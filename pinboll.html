@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ピンボールゲーム</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #222;
+      font-family: sans-serif;
+      overflow: hidden;
+    }
+    canvas {
+      background: #444;
+      display: none;
+      width: 100vw;
+      height: 80vh;
+    }
+    #restartBtn {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      font-size: 14px;
+      padding: 6px 12px;
+      background: #eee;
+      color: #000;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      opacity: 0.8;
+      z-index: 5;
+    }
+    #restartBtn:hover { opacity: 1; }
+    #startScreen, #resultScreen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #111;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+    }
+    #startScreen input, #resultScreen button {
+      padding: 10px;
+      font-size: 16px;
+      margin: 10px;
+      width: 80%;
+      max-width: 300px;
+    }
+    #startScreen button, #resultScreen button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background: limegreen;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    #countdown {
+      font-size: 48px;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      z-index: 9;
+    }
+  </style>
+</head>
+<body>
+<div id="startScreen">
+  <h1>ピンボールゲーム</h1>
+  <input id="userIdInput" type="text" placeholder="ユーザーID" />
+  <input id="userNameInput" type="text" placeholder="ユーザー名" />
+  <button onclick="startCountdown()">ゲームスタート</button>
+</div>
+<div id="countdown"></div>
+<div id="resultScreen" style="display: none;">
+  <h2>ゲーム終了！</h2>
+  <p id="resultScore"></p>
+  <button onclick="backToStart()">もう一度プレイ</button>
+</div>
+<canvas id="game" width="400" height="600"></canvas>
+<button id="restartBtn">Restart</button>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let allUsers = {};
+let currentUser = { id: '', name: '' };
+
+function startCountdown() {
+  const id = document.getElementById('userIdInput').value.trim();
+  const name = document.getElementById('userNameInput').value.trim();
+  if (!id || !name) {
+    alert('IDと名前を入力してください');
+    return;
+  }
+  currentUser = { id, name };
+  if (!allUsers[id]) {
+    allUsers[id] = { name, scores: [] };
+  }
+  document.getElementById('startScreen').style.display = 'none';
+  let count = 3;
+  const countdown = document.getElementById('countdown');
+  countdown.innerText = count;
+  countdown.style.display = 'block';
+  const interval = setInterval(() => {
+    count--;
+    if (count === 0) {
+      clearInterval(interval);
+      countdown.style.display = 'none';
+      canvas.style.display = 'block';
+      initBumpers();
+      loop();
+    } else {
+      countdown.innerText = count;
+    }
+  }, 1000);
+}
+
+function backToStart() {
+  document.getElementById('resultScreen').style.display = 'none';
+  document.getElementById('startScreen').style.display = 'flex';
+}
+
+const ball = { x: 200, y: 550, radius: 7, dx: 3, dy: -4 };
+const paddle = { width: 80, height: 10, x: 160, y: 570, dx: 0, speed: 6 };
+let bumpers = [];
+let score = 0;
+let rareTarget = null;
+let rareTimer = 0;
+
+function randomPos(margin = 30) {
+  return {
+    x: Math.random() * (canvas.width - margin * 2) + margin,
+    y: Math.random() * (canvas.height / 2) + margin
+  };
+}
+
+function initBumpers() {
+  bumpers = [];
+  for (let i = 0; i < 6; i++) {
+    bumpers.push({ ...randomPos(), size: 30 });
+  }
+}
+
+function drawBall() {
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+  ctx.fillStyle = 'yellow';
+  ctx.fill();
+}
+
+function drawPaddle() {
+  ctx.fillStyle = 'white';
+  ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+}
+
+function drawBumpers() {
+  ctx.fillStyle = 'red';
+  bumpers.forEach(b => ctx.fillRect(b.x - 15, b.y - 15, 30, 30));
+}
+
+function drawRareTarget() {
+  if (rareTarget) {
+    ctx.beginPath();
+    ctx.arc(rareTarget.x, rareTarget.y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = 'gold';
+    ctx.fill();
+  }
+}
+
+function moveRareTarget() {
+  if (rareTarget) {
+    rareTarget.x += rareTarget.dx;
+    if (rareTarget.x < 0 || rareTarget.x > canvas.width) rareTarget.dx *= -1;
+  }
+}
+
+function drawScoreInfo() {
+  ctx.fillStyle = 'white';
+  ctx.font = '14px sans-serif';
+  ctx.fillText(`Score: ${score}`, 10, 20);
+
+  const userScores = allUsers[currentUser.id]?.scores || [];
+  const top3 = [...userScores].sort((a, b) => b - a).slice(0, 3);
+  ctx.fillText(`あなたの記録:`, 10, 40);
+  top3.forEach((s, i) => ctx.fillText(`${i + 1}: ${s}`, 10, 60 + i * 20));
+
+  let topUser = null;
+  let max = 0;
+  for (const [id, u] of Object.entries(allUsers)) {
+    const userTop = Math.max(...u.scores, 0);
+    if (userTop > max) {
+      max = userTop;
+      topUser = u.name;
+    }
+  }
+  ctx.fillStyle = 'lightgreen';
+  ctx.fillText(`全体最高: ${max} (${topUser || 'なし'})`, 10, 140);
+}
+
+function restart() {
+  ball.x = 200; ball.y = 550; ball.dx = 3; ball.dy = -4;
+  paddle.x = 160;
+  score = 0;
+  rareTarget = null;
+  rareTimer = 0;
+  initBumpers();
+}
+
+function gameOver() {
+  allUsers[currentUser.id].scores.unshift(score);
+  if (allUsers[currentUser.id].scores.length > 10) {
+    allUsers[currentUser.id].scores.pop();
+  }
+  document.getElementById('resultScore').innerText = `${currentUser.name} さんのスコア: ${score}`;
+  document.getElementById('resultScreen').style.display = 'flex';
+  canvas.style.display = 'none';
+  score = 0;
+}
+
+function checkCollision() {
+  bumpers.forEach(b => {
+    const dx = ball.x - b.x;
+    const dy = ball.y - b.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < ball.radius + b.size / 2) {
+      ball.dy *= -1;
+      score += 10;
+      if (Math.random() < 1 / 1200 && !rareTarget) {
+        const pos = randomPos();
+        rareTarget = { x: pos.x, y: pos.y, dx: 2 };
+        rareTimer = 300; // frames
+      }
+    }
+  });
+
+  if (rareTarget) {
+    const dx = ball.x - rareTarget.x;
+    const dy = ball.y - rareTarget.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < ball.radius + 12) {
+      score += 100;
+      rareTarget = null;
+    }
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') paddle.dx = -paddle.speed;
+  else if (e.key === 'ArrowRight') paddle.dx = paddle.speed;
+});
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') paddle.dx = 0;
+});
+document.getElementById('restartBtn').onclick = restart;
+
+function update() {
+  paddle.x += paddle.dx;
+  if (paddle.x < 0) paddle.x = 0;
+  if (paddle.x + paddle.width > canvas.width) paddle.x = canvas.width - paddle.width;
+
+  ball.x += ball.dx;
+  ball.y += ball.dy;
+  if (ball.x < 0 || ball.x > canvas.width) ball.dx *= -1;
+  if (ball.y < 0) ball.dy *= -1;
+
+  if (ball.y + ball.radius > paddle.y && ball.x > paddle.x && ball.x < paddle.x + paddle.width) {
+    ball.dy = -ball.dy;
+    ball.y = paddle.y - ball.radius;
+  }
+  if (ball.y > canvas.height) gameOver();
+
+  if (rareTimer > 0) {
+    rareTimer--;
+    if (rareTimer <= 0) rareTarget = null;
+  }
+  moveRareTarget();
+  checkCollision();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawBall();
+  drawPaddle();
+  drawBumpers();
+  drawRareTarget();
+  drawScoreInfo();
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
